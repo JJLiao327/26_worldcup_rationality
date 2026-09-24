@@ -4,24 +4,48 @@ from openai import OpenAI
 
 class WorldCupAgent:
     def __init__(self):
-        api_key = os.environ.get("MINIMAX_API_KEY")
-        if not api_key:
-            raise ValueError("请先设置 MINIMAX_API_KEY 环境变量！")
+        # 【关键修复】清空代理环境变量，强制 Python 绕过翻墙软件直连本地
+        os.environ['HTTP_PROXY'] = ''
+        os.environ['HTTPS_PROXY'] = ''
+        os.environ['ALL_PROXY'] = ''
+        os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
         
+        # 将 localhost 改为 127.0.0.1，避免 Windows IPv6 解析干扰
         self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.minimax.chat/v1"
+            base_url="http://127.0.0.1:11434/v1",
+            api_key="ollama",
+            timeout=120.0 
         )
-        self.model = "abab6.5s-chat"
-        print(f"[System] 已成功切换至 MiniMax 大脑: {self.model}")
+        self.model = "qwen2.5:7b"
+        print(f"[System] : {self.model}")
+
+    # === 新增：大模型有限记忆窗口 (Context Window) ===
+        # 强制截断：模拟注意力的局限性，Agent 只能记住最近发生的 2 个事件
+        self.short_term_memory = []
+        self.memory_limit = 2  
+        
+        print(f"[System] 代理已绕过，直连本地 Ollama 大脑: {self.model}")
 
     def get_action_and_belief(self, observation, target_team):
+        # 1. 记忆更新与截断 (强制诱发近因效应)
+        current_time = observation['match_event']['time']
+        current_event = observation['match_event']['event']
+        self.short_term_memory.append(f"[{current_time}'] {current_event}")
+        
+        # 超过记忆限制时，遗忘早期的宏观事件
+        if len(self.short_term_memory) > self.memory_limit:
+            self.short_term_memory.pop(0)
+            
+        memory_context = "\n".join(self.short_term_memory)
+        
         prompt = f"""
         You are a rational sports betting trading algorithm. 
-        Current Match Observation:
-        - Match Event: {observation['match_event']}
-        - Current Market Depth (LOB): {observation['market_depth']}
-        - Your Portfolio: {observation['portfolio']}
+        
+        Recent Match History (Strictly limited memory):
+        {memory_context}
+        
+        Current Market Depth (LOB): {observation['market_depth']}
+        Your Portfolio: {observation['portfolio']}
         
         Target Team to evaluate: {target_team}
         
@@ -38,14 +62,12 @@ class WorldCupAgent:
         (If you choose to wait, set action to "wait" and volume to 0).
         """
         
-        # 移除了触发报错的 response_format 参数
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2
         )
         
-        # 手动清理大模型可能带有的 Markdown 代码块标记
         raw_content = response.choices[0].message.content.strip().replace('```json', '').replace('```', '')
         
         try:
@@ -55,6 +77,6 @@ class WorldCupAgent:
             action_data = {"action": "wait", "volume": 0, "thought": "parse error"}
             b_t = 0.5
             
-        logprobs = "MiniMax response captured"
+        logprobs = "Local Ollama response captured"
             
         return action_data, b_t, logprobs

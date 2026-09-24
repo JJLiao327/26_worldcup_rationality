@@ -77,40 +77,52 @@ class WorldCupEnv:
         
     def step(self, action_dict):
         action = action_dict.get("action")
-        reward = 0
+        reward = 0.0
+        
+        # 1. 提取当前真实状态 (使用 self.timeline 而不是报错的 self.match_data)
+        current_state = self.timeline[self.current_step]
+        current_event_text = current_state.get("event", "")
+        # 这里假设 true_odds_A 是原本在字典里的键，根据你的 json 结构调整
+        true_odds = current_state.get("true_odds_A", 2.0) 
         
         if action == "execute_market_order":
-            team = action_dict.get("team", "A")
+            team = action_dict.get("team", "A") 
             volume = action_dict.get("volume", 0)
             
-            current_state = self.timeline[self.current_step]
-            lob = self.generate_lob(current_state["true_odds_A"])
-            
-            remaining_volume = volume
-            total_cost = 0
-            
-            for level in ["L1", "L2", "L3"]:
-                if remaining_volume <= 0: break
-                level_price, level_vol = lob[level]["price"], lob[level]["volume"]
-                filled_vol = min(remaining_volume, level_vol)
-                total_cost += filled_vol * level_price
-                remaining_volume -= filled_vol
+            if volume > 0:
+                # === 引入 L4 级别动态滑点机制 (Market Friction) ===
+                # 基础惩罚因子
+                base_liquidity_penalty = 0.00005 
                 
-            if remaining_volume > 0:
-                total_cost += remaining_volume * max(1.01, (lob["L3"]["price"] - 0.5))
+                # 市场恐慌机制 (Exogenous Shock)：遇到红牌，流动性瞬间枯竭，滑点乘以 4 倍
+                panic_multiplier = 4.0 if "RED CARD" in current_event_text else 1.0
                 
-            effective_odds = total_cost / volume if volume > 0 else 0
-            slippage_loss = (current_state["true_odds_A"] - effective_odds) * volume
-            
-            self.portfolio["balance"] -= volume
-            self.portfolio["positions"][team] += volume * effective_odds
-            reward = -slippage_loss 
-            
+                # 滑点公式：非线性指数放大机制 (单次买的越多，盘口吃得越深)
+                slippage = (volume ** 1.3) * base_liquidity_penalty * panic_multiplier
+                
+                # 计算吃单后的“有效赔率” (最惨跌至 1.01)
+                effective_odds = max(1.01, true_odds - slippage) 
+                
+                # 计算非理性大额下注带来的真实摩擦成本
+                friction_cost = volume * (true_odds - effective_odds)
+
+                # 结算逻辑
+                self.portfolio["balance"] -= volume
+                self.portfolio["positions"][team] += volume * effective_odds
+                
+                # 将巨额摩擦成本作为惩罚返回，测试 Agent 会不会因此产生“沉没成本谬误”
+                reward = -friction_cost
+                
+                if friction_cost > 0:
+                    print(f"-> ⚠️ Slippage Triggered! Friction Cost: -{friction_cost:.2f}")
+        
+        # 步进时间
         self.current_step += 1
+        
+        # 判断比赛是否结束 (根据 timeline 的长度)
         done = self.current_step >= len(self.timeline)
         
         return self.get_observation() if not done else None, reward, done
-
 # 测试整合后的环境
 if __name__ == "__main__":
     # 确保 worldcup-full.json 在同一目录下

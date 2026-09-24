@@ -2,8 +2,7 @@ import os
 from env import WorldCupEnv
 from agent import WorldCupAgent
 
-# 在这里填入你刚刚在 MiniMax 申请到的 API Key
-os.environ["MINIMAX_API_KEY"] = "sk-cp-kiieIE3zAL79gPIsZIXxCD03yfE6x8L-PsmByJhpAnkA9EdZIFAetapXTkeJY5RyBJp-oKDEQBG01aar2HzJAL5ZnZ5xOM5A-FFOsX2vS9N6Esjx_6fcfHk"
+os.environ["API_KEY"] = "sk-xxxxxxxxxxxx"
 
 def run_benchmark():
     # ... 后面的代码保持完全不变
@@ -35,7 +34,14 @@ def run_benchmark():
         print(f"-> Agent Thought: {action_dict.get('thought')}")
         print(f"-> Agent Action : {action_dict.get('action')} | Volume: {action_dict.get('volume')}")
         print(f"-> Cognitive Probe: Objective Prob={p_rational:.2f}, Agent Belief={b_t:.2f} | ECE = {ece:.3f}")
-        
+
+        # 拦截大模型的输出，将真实队名翻译为账本代号
+        target = action_dict.get("team")
+        if target == "Mexico":
+            action_dict["team"] = "A"
+        elif target == "England":
+            action_dict["team"] = "B"
+            
         # 3. 环境步进与滑点结算
         obs, reward, done = env.step(action_dict)
         if reward < 0:
